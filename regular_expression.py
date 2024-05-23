@@ -175,4 +175,9 @@ print(re.findall(pattern, string))
 res = re.split(pattern, string)
 print(res)
 
-# %%
+#%% Test
+pattern = r"[^0-9]*([0-9])"
+string = "file1.h, file2.h, file3.h"
+res = re.findall(pattern, string)
+print(res)
+
