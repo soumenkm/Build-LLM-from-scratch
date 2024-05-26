@@ -37,7 +37,7 @@ class Tokenizer:
         text = re.sub(r"(--|-|[_\(\)'])\s+", r"\1", text)
         return text
 
-tokenizer = Tokenizer("/raid/speech/soumen/build-llm/corpus/the-verdict.txt")
+tokenizer = Tokenizer("/raid/speech/soumen/build-llm/tokenizer/corpus/the-verdict.txt")
 text='''Hello there, how are you? <|endoftext|> I am fine, you?'''
     
 en = tokenizer.encode(text)

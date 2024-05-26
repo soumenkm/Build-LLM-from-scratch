@@ -11,7 +11,7 @@ trainer = tn.trainers.WordPieceTrainer(vocab_size=1000,
                                  show_progress=False,
                                  special_tokens=["<|endoftext|>", "<|unk|>","<|pad|>","<|mask|>"])
 
-tokenizer.train(files=["/raid/speech/soumen/build-llm/corpus/the-verdict.txt"],
+tokenizer.train(files=["/raid/speech/soumen/build-llm/tokenizer/corpus/the-verdict.txt"],
                 trainer=trainer)
 
 print(f"First 10 items in vocabulary: {list(tokenizer.get_vocab().items())[0:10]}")
