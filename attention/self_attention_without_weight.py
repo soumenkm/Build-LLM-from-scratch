@@ -13,7 +13,7 @@ keys = inputs.clone().detach().requires_grad_(True)
 values = inputs.clone().detach().requires_grad_(True)
 
 attn_score = torch.matmul(queries, keys.T)
-attn_weight = torch.nn.functional.softmax(attn_score, dim=1)
+attn_weight = torch.nn.functional.softmax(attn_score, dim=-1)
 
 print(attn_weight)
 
