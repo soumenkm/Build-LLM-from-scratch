@@ -1,10 +1,10 @@
 import torch
 
-class MaskedSelfAttention(torch.nn.Module):
+class MaskedSelfAttentionWithDropout(torch.nn.Module):
     
-    def __init__(self, in_embedding_dim, out_embedding_dim, sequence_length):
+    def __init__(self, in_embedding_dim, out_embedding_dim, sequence_length, dropout_prob=0.2):
         
-        super(MaskedSelfAttention, self).__init__()
+        super(MaskedSelfAttentionWithDropout, self).__init__()
         self.d_in = in_embedding_dim
         self.d_out = out_embedding_dim
         self.T = sequence_length
@@ -17,6 +17,7 @@ class MaskedSelfAttention(torch.nn.Module):
         self.value_layer = torch.nn.Linear(in_features=self.d_in, 
                                            out_features=self.d_out, 
                                            bias=False)
+        self.dropout = torch.nn.Dropout(dropout_prob)
         self.register_buffer("mask", torch.triu(torch.full(size=(self.T, self.T), 
                                                            fill_value=-torch.inf), 
                                                 diagonal=1))
@@ -37,6 +38,7 @@ class MaskedSelfAttention(torch.nn.Module):
         masked_W = scaled_W + self.mask
         
         A = torch.nn.functional.softmax(masked_W, dim=-1) # (T, T)
+        A = self.dropout(A)
         
         contexts = torch.matmul(A, Vm) # (T, d_out)
         assert contexts.shape[-1] == self.d_out, f"contexts.shape must be ({self.T}, {self.d_out})"
@@ -53,7 +55,10 @@ if __name__ == "__main__":
         [0.77, 0.25, 0.10], # one (x^5)
         [0.05, 0.80, 0.55]] # step (x^6)
     )
-    msa_layer = MaskedSelfAttention(in_embedding_dim=3, out_embedding_dim=2, sequence_length=6)
+    msa_layer = MaskedSelfAttentionWithDropout(in_embedding_dim=3, 
+                                               out_embedding_dim=2, 
+                                               sequence_length=6,
+                                               dropout_prob=0.5)
     outputs, A = msa_layer(inputs)
     
     print(outputs)
