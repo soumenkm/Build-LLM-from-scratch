@@ -42,7 +42,8 @@ class MaskedSelfAttentionWithDropout(torch.nn.Module):
         
         contexts = torch.matmul(A, Vm) # (T, d_out)
         assert contexts.shape[-1] == self.d_out, f"contexts.shape must be ({self.T}, {self.d_out})"
-        
+        assert contexts.shape[-2] == self.T, f"contexts.shape must be ({self.T}, {self.d_out})"
+
         return contexts, A
 
 if __name__ == "__main__":

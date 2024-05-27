@@ -30,7 +30,7 @@ class MaskedSelfAttention(torch.nn.Module):
         Km = self.key_layer(inputs) # (T, d_out)
         Vm = self.value_layer(inputs) # (T, d_out)
         
-        W = torch.matmul(Qm, Km.T) # (T, T)
+        W = torch.matmul(Qm, Km.transpose(-1, -2)) # (T, T)
         scaled_W = W/torch.sqrt(torch.tensor([self.d_out])) # (T, T)
         
         scaled_W = torch.tril(scaled_W)  
@@ -40,19 +40,13 @@ class MaskedSelfAttention(torch.nn.Module):
         
         contexts = torch.matmul(A, Vm) # (T, d_out)
         assert contexts.shape[-1] == self.d_out, f"contexts.shape must be ({self.T}, {self.d_out})"
-        
+        assert contexts.shape[-2] == self.T, f"contexts.shape must be ({self.T}, {self.d_out})"
+
         return contexts, A
 
 if __name__ == "__main__":
     
-    inputs = torch.tensor(
-        [[0.43, 0.15, 0.89], # Your (x^1)
-        [0.55, 0.87, 0.66], # journey (x^2)
-        [0.57, 0.85, 0.64], # starts (x^3)
-        [0.22, 0.58, 0.33], # with (x^4)
-        [0.77, 0.25, 0.10], # one (x^5)
-        [0.05, 0.80, 0.55]] # step (x^6)
-    )
+    inputs = torch.randn(size=(2,6,3))
     msa_layer = MaskedSelfAttention(in_embedding_dim=3, out_embedding_dim=2, sequence_length=6)
     outputs, A = msa_layer(inputs)
     
