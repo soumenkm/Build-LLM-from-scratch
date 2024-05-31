@@ -24,6 +24,9 @@ class MultiHeadSelfAttention(torch.nn.Module):
         self.value_layer = torch.nn.Linear(in_features=self.d_in, 
                                            out_features=self.d_out, 
                                            bias=False)
+        self.linear = torch.nn.Linear(in_features=self.d_out,
+                                      out_features=self.d_out,
+                                      bias=True) # Optional
         self.dropout = torch.nn.Dropout(dropout_prob)
         
     def forward(self, inputs):
@@ -56,6 +59,7 @@ class MultiHeadSelfAttention(torch.nn.Module):
         Z = Z.transpose(1, 2) # (b, T, h, d_h)
         Z = Z.contiguous() # to get rid of unsafe gradient
         Z = Z.reshape(b, self.T, self.d_out) # (b, T, d_out)
+        Z = self.linear(Z) # (b, T, d_out) (optional)
         
         assert Z.shape[-1] == self.d_out, f"contexts.shape must be (None, {self.T}, {self.d_out})"
         assert Z.shape[-2] == self.T, f"contexts.shape must be (None, {self.T}, {self.d_out})"
@@ -87,6 +91,9 @@ class MultiHeadCausalSelfAttention(torch.nn.Module):
         self.value_layer = torch.nn.Linear(in_features=self.d_in, 
                                            out_features=self.d_out, 
                                            bias=False)
+        self.linear = torch.nn.Linear(in_features=self.d_out,
+                                      out_features=self.d_out,
+                                      bias=True) # Optional
         self.dropout = torch.nn.Dropout(dropout_prob)
         
         mask = torch.full(size=(self.T, self.T), fill_value=-torch.inf)
@@ -125,6 +132,7 @@ class MultiHeadCausalSelfAttention(torch.nn.Module):
         Z = Z.transpose(1, 2) # (b, T, h, d_h)
         Z = Z.contiguous() # to get rid of unsafe gradient
         Z = Z.reshape(b, self.T, self.d_out) # (b, T, d_out)
+        Z = self.linear(Z) # (b, T, d_out) (optional)
         
         assert Z.shape[-1] == self.d_out, f"contexts.shape must be (None, {self.T}, {self.d_out})"
         assert Z.shape[-2] == self.T, f"contexts.shape must be (None, {self.T}, {self.d_out})"
