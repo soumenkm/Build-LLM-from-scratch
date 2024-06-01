@@ -69,12 +69,12 @@ class MultiHeadSelfAttention(torch.nn.Module):
 
 class MultiHeadCausalSelfAttention(torch.nn.Module):
     
-    def __init__(self, in_embedding_dim, out_embedding_dim, sequence_length, num_heads, dropout_prob=0.2):
+    def __init__(self, in_embedding_dim, out_embedding_dim, max_sequence_length, num_heads, dropout_prob=0.2):
         
         super(MultiHeadCausalSelfAttention, self).__init__()
         self.d_in = in_embedding_dim
         self.d_out = out_embedding_dim
-        self.T = sequence_length
+        self.Tmax = max_sequence_length
         self.h = num_heads
         
         if self.d_out % self.h == 0:
@@ -96,25 +96,24 @@ class MultiHeadCausalSelfAttention(torch.nn.Module):
                                       bias=True) # Optional
         self.dropout = torch.nn.Dropout(dropout_prob)
         
-        mask = torch.full(size=(self.T, self.T), fill_value=-torch.inf)
-        mask = torch.triu(mask, diagonal=1)
+        mask = torch.full(size=(self.Tmax, self.Tmax), fill_value=-torch.inf) # (Tmax, Tmax)
+        mask = torch.triu(mask, diagonal=1) # (Tmax, Tmax)
         self.register_buffer("mask", mask)
         
     def forward(self, inputs):
         
-        assert inputs.shape[-1] == self.d_in, f"inputs.shape must be (None, {self.T}, {self.d_in})"
-        assert inputs.shape[-2] == self.T, f"inputs.shape must be (None, {self.T}, {self.d_in})"
+        assert inputs.shape[-1] == self.d_in, f"inputs.shape must be (b, T, {self.d_in})"
         assert list(inputs.shape).__len__() == 3, "inputs rank must be 3"
+        
+        b, T = inputs.shape[0:2]
         
         Q = self.query_layer(inputs) # (b, T, d_out)
         K = self.key_layer(inputs) # (b, T, d_out)
         V = self.value_layer(inputs) # (b, T, d_out)
         
-        b = Q.shape[0]
-        
-        Q = Q.reshape(b, self.T, self.h, self.d_h) # (b, T, h, d_h)
-        K = K.reshape(b, self.T, self.h, self.d_h) # (b, T, h, d_h)
-        V = V.reshape(b, self.T, self.h, self.d_h) # (b, T, h, d_h)
+        Q = Q.reshape(b, T, self.h, self.d_h) # (b, T, h, d_h)
+        K = K.reshape(b, T, self.h, self.d_h) # (b, T, h, d_h)
+        V = V.reshape(b, T, self.h, self.d_h) # (b, T, h, d_h)
         
         Q = Q.transpose(1, 2) # (b, h, T, d_h)
         K = K.transpose(1, 2) # (b, h, T, d_h)
@@ -123,7 +122,7 @@ class MultiHeadCausalSelfAttention(torch.nn.Module):
         W = torch.matmul(Q, K.transpose(2, 3)) # (b, h, T, T)
         scaled_W = W / torch.sqrt(torch.tensor([self.d_h])) # (b, h, T, T)
         scaled_W = torch.tril(scaled_W, diagonal=0) # (b, h, T, T) (last 2 dim is taken)   
-        scaled_W = scaled_W + self.mask # (b, h, T, T) (mask is broadcasted)
+        scaled_W = scaled_W + self.mask[:T, :T] # (b, h, T, T) (mask is broadcasted and sliced for dynamic seq length)
          
         A = torch.nn.functional.softmax(scaled_W, dim=-1) # (b, h, T, T)
         A = self.dropout(A) # (b, h, T, T)
@@ -131,11 +130,11 @@ class MultiHeadCausalSelfAttention(torch.nn.Module):
         Z = torch.matmul(A, V) # (b, h, T, d_h)
         Z = Z.transpose(1, 2) # (b, T, h, d_h)
         Z = Z.contiguous() # to get rid of unsafe gradient
-        Z = Z.reshape(b, self.T, self.d_out) # (b, T, d_out)
+        Z = Z.reshape(b, T, self.d_out) # (b, T, d_out)
         Z = self.linear(Z) # (b, T, d_out) (optional)
         
-        assert Z.shape[-1] == self.d_out, f"contexts.shape must be (None, {self.T}, {self.d_out})"
-        assert Z.shape[-2] == self.T, f"contexts.shape must be (None, {self.T}, {self.d_out})"
+        assert Z.shape[-1] == self.d_out, f"contexts.shape must be (b, {T}, {self.d_out})"
+        assert Z.shape[-2] == T, f"contexts.shape must be (b, {T}, {self.d_out})"
         assert list(Z.shape).__len__() == 3, "contexts rank must be 3"
         
         return Z, A
