@@ -201,7 +201,7 @@ class GPTModel(torch.nn.Module):
                                             bias=False)
         self.softmax = torch.nn.Softmax(dim=-1)
          
-    def forward(self, inputs: torch.tensor, is_logits: bool=False) -> torch.tensor:
+    def forward(self, inputs: torch.tensor, is_logits: bool=True) -> torch.tensor:
         
         assert list(inputs.shape).__len__() == 2, "inputs rank must be 2 and inputs.shape = (b, T)"
         
@@ -220,29 +220,6 @@ class GPTModel(torch.nn.Module):
         p = self.softmax(z) # (b, T, V)
         
         return z if is_logits else p
-
-def generate_text(start_context: list, model: GPTModel, max_num_tokens: int=50) -> str:
-    
-    tokenizer = tiktoken.get_encoding("gpt2")
-    
-    inputs = torch.tensor(tokenizer.encode(start_context)).unsqueeze(0) # (1, T)
-    model.eval()
-    for i in range(max_num_tokens):
-        inputs = inputs[:, :model.Tmax] # (1, T) but at max (1, Tmax)
-        
-        with torch.no_grad():
-            outputs = model(inputs, is_logits=False) # (1, T, V)
-        
-        max_prob_index = outputs.argmax(dim=-1, keepdim=False) # (1, T)
-        last_token_pred = max_prob_index[:, -1].unsqueeze(-1) # (1, 1)  
-        if last_token_pred[0,0] == tokenizer.eot_token:
-            break
-        
-        inputs = torch.cat([inputs, last_token_pred], dim=-1) # (1, T+1)
-    
-    decoded_text = tokenizer.decode(inputs.squeeze(0).tolist())
-    
-    return decoded_text
           
 if __name__ == "__main__":
     
@@ -256,5 +233,4 @@ if __name__ == "__main__":
     }
     
     model = GPTModel(config=CONFIG)
-    text = generate_text(start_context="Hello, I am", model=model, max_num_tokens=200)
-    print(text)
+    torchinfo.summary(model)
