@@ -1,3 +1,5 @@
 torch_pg.py
 __pycache__
 .vscode
+DS_Store
+*.pth
