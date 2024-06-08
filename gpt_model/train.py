@@ -21,7 +21,7 @@ def token_ids_to_text(token_ids: torch.tensor, tokenizer: "tiktoken.tokenizer") 
     
     return text
     
-def generate_text(start_context: str, model: GPTModel, tokenizer: "tiktoken.tokenizer", device: "torch.device", max_num_tokens: int=50) -> str:
+def generate_text(start_context: str, model: GPTModel, tokenizer: "tiktoken.tokenizer", device: "torch.device", max_num_tokens: int=50, temperature: float=0.7, top_k: int=50) -> str:
 
     inputs = text_to_token_ids(text=start_context, tokenizer=tokenizer) # (1, T)
     model = model.to(device)
@@ -32,10 +32,16 @@ def generate_text(start_context: str, model: GPTModel, tokenizer: "tiktoken.toke
         
         with torch.no_grad():
             inputs = inputs.to(device)
-            outputs = model(inputs, is_logits=False) # (1, T, V)
+            outputs = model(inputs, is_logits=True) # (1, T, V)
         
-        max_prob_index = outputs.argmax(dim=-1, keepdim=False) # (1, T)
-        last_token_pred = max_prob_index[:, -1].unsqueeze(-1) # (1, 1)  
+        top_k_limit = torch.sort(outputs, dim=-1, descending=True)[0][:,:,-1].unsqueeze(-1) # (1, T, 1)
+        mask = torch.full_like(outputs, fill_value=-torch.inf) # (1, T, V)
+        outputs_mask = torch.where(condition=outputs<top_k_limit, input=mask, other=outputs) # (1, T, V)
+        outputs_mask = outputs_mask / temperature
+        outputs_mask_prob = torch.nn.functional.softmax(input=outputs_mask, dim=-1) # (1, T, V)
+        
+        last_multnom_index = torch.multinomial(input=outputs_mask_prob[0,-1,:], num_samples=1) # (1,)
+        last_token_pred = last_multnom_index.unsqueeze(-1) # (1, 1)  
         if last_token_pred[0,0] == tokenizer.eot_token:
             break
         
@@ -152,7 +158,7 @@ if __name__ == "__main__":
 
     device = torch.device(device_type)
 
-    BATCH_SIZE = 2
+    BATCH_SIZE = 16
     CONFIG = {
         "vocab_size": 50257,
         "max_context_length": 256,
@@ -161,11 +167,11 @@ if __name__ == "__main__":
         "n_layers": 12,
         "drop_rate": 0.1
     }
-    IS_TRAIN = True
+    IS_TRAIN = False
     tokenizer = tiktoken.get_encoding("gpt2")
     model = GPTModel(config=CONFIG)
 
-    corpus_path = pathlib.Path("/Users/soumen/Desktop/IITB/sem2/LLM/Build-LLM-from-scratch/tokenizer/corpus")
+    corpus_path = pathlib.Path(pathlib.Path.cwd(),"tokenizer","corpus")
     file_list = [str(i) for i in corpus_path.iterdir()]
 
     train_text, val_text = train_val_split(file_list=file_list, train_val_split_ratio=0.8)
@@ -175,9 +181,9 @@ if __name__ == "__main__":
     optimizer = torch.optim.AdamW(params=model.parameters(), lr=0.0004, betas=(0.9, 0.999), weight_decay=0.1)
     
     if IS_TRAIN:
-        history = train(num_epochs=1, model=model, optimizer=optimizer, train_dl=train_dl, val_dl=val_dl, device=device)
+        history = train(num_epochs=10, model=model, optimizer=optimizer, train_dl=train_dl, val_dl=val_dl, device=device)
         torch.save(model.state_dict(), pathlib.Path(pathlib.Path.cwd(), "model.pth"))
     else:
         model.load_state_dict(torch.load(pathlib.Path(pathlib.Path.cwd(), "model.pth")))
-        text = generate_text(start_context="Hello world!", model=model, tokenizer=tokenizer, device=device, max_num_tokens=20)
+        text = generate_text(start_context="Hello, I am not a", model=model, tokenizer=tokenizer, device=device, max_num_tokens=20)
         print(text)

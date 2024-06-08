@@ -31,7 +31,7 @@ class GELU(torch.nn.Module):
     def forward(self, inputs: torch.tensor) -> torch.tensor:
         
         assert list(inputs.shape).__len__() == 3, "inputs rank must be 3, inputs.shape = (b, T, d)"
-        outputs = 0.5 * inputs * (1 + torch.tanh(torch.sqrt(torch.tensor([2/torch.pi])) 
+        outputs = 0.5 * inputs * (1 + torch.tanh(torch.sqrt(torch.tensor([2/torch.pi]).to(inputs.device)) 
                                                  * (inputs + 0.044715 * (inputs ** 3)))) # (b, T, d)
 
         return outputs
@@ -116,7 +116,7 @@ class MultiHeadCausalSelfAttention(torch.nn.Module):
         V = V.transpose(1, 2) # (b, h, T, d_h)
         
         W = torch.matmul(Q, K.transpose(2, 3)) # (b, h, T, T)
-        scaled_W = W / torch.sqrt(torch.tensor([self.d_h])) # (b, h, T, T)
+        scaled_W = W / torch.sqrt(torch.tensor([self.d_h]).to(inputs.device)) # (b, h, T, T)
         scaled_W = torch.tril(scaled_W, diagonal=0) # (b, h, T, T) (last 2 dim is taken)   
         scaled_W = scaled_W + self.mask[:T, :T] # (b, h, T, T) (mask is broadcasted and sliced for dynamic seq length)
          
@@ -208,7 +208,8 @@ class GPTModel(torch.nn.Module):
         b, T = inputs.shape
         
         x1 = self.token_embed_layer(inputs) # (b, T, d)
-        pos_tokens = torch.arange(T).unsqueeze(0).repeat(b, 1) # (b, T)
+        pos_tokens = torch.arange(T).unsqueeze(0).repeat(b, 1).to(inputs.device) # (b, T)
+    
         x2 = self.pos_embed_layer(pos_tokens) # (b, T, d)
         x = x1 + x2 # (b, T, d)
         x = self.drop_emb_layer(x) # (b, T, d)
