@@ -41,7 +41,6 @@ def generate_text(start_context: str, model: GPTModel, tokenizer: "tiktoken.toke
         
         inputs = torch.cat([inputs, last_token_pred], dim=-1) # (1, T+1)
     
-    model.train()
     generated_token_ids = inputs # (1, T+Ti)
     generated_text = token_ids_to_text(token_ids=generated_token_ids, tokenizer=tokenizer)
     
@@ -60,7 +59,6 @@ def evaluate_batch(batch: Tuple[torch.tensor, torch.tensor], model: GPTModel, de
         model.eval()
         with torch.no_grad():
             pred_logits = model(inputs) # (b, T, V)
-        model.train()
         
     pred_logits = pred_logits.flatten(start_dim=0, end_dim=1) # (b*T, V)
     targets = targets.flatten(start_dim=0, end_dim=1) # (b*T,)
@@ -70,15 +68,25 @@ def evaluate_batch(batch: Tuple[torch.tensor, torch.tensor], model: GPTModel, de
 
     return loss_metric, acc_metric
 
-def evaluate_dataloader(dataloader: "torch.dataloader", model: GPTModel, device: "torch.device", is_train: bool, batch_fraction: float) -> float:
+def evaluate_dataloader(dataloader: "torch.dataloader", model: GPTModel, device: "torch.device", is_train: bool, batch_fraction: float) -> Tuple[float, float]:
     
-    num_batches = int(len(dataloader) * batch_fraction) # a small num of batches for speed
-    random_batches = random.sample(list(dataloader), num_batches)
+    if int(batch_fraction) < 1:
+        num_batches = len(dataloader)
+        num_examples = len(dataloader.dataset)
+        num_batches_to_eval = int(num_batches * batch_fraction) # for speed
+        num_examples_to_eval = num_batches_to_eval * dataloader.batch_size
+        
+        example_indices = list(range(num_examples))
+        eval_example_indices = random.sample(example_indices, k=num_examples_to_eval) # without replacement
+        
+        random_sampler = torch.utils.data.SubsetRandomSampler(eval_example_indices)
+        random_dataloader = torch.utils.data.DataLoader(dataset=dataloader.dataset, batch_size=dataloader.batch_size, shuffle=False, drop_last=True, sampler=random_sampler)
+        dataloader = random_dataloader
     
     loss_metric_list = []
     acc_metric_list = []
     
-    for batch in random_batches:
+    for batch in dataloader:
         loss_metric_batch, acc_metric_batch = evaluate_batch(batch=batch, model=model, device=device, is_train=is_train)
         loss_metric_list.append(loss_metric_batch.item())
         acc_metric_list.append(acc_metric_batch.item())
@@ -100,7 +108,6 @@ def train(num_epochs: int, model: GPTModel, optimizer: "torch.optimizer", train_
     for ep in range(num_epochs):
         train_loss_list = []
         train_acc_list = []
-        num_steps = len(train_dl)
         
         with tqdm(train_dl, desc=f"Epoch: {ep+1}/{num_epochs}", postfix={"train_batch_loss": 0, "train_batch_acc": 0}, colour="green") as pbar:
         
