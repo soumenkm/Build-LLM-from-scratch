@@ -1,4 +1,4 @@
-import torch, torchinfo, json, sys, tiktoken, pathlib, random
+import torch, torchinfo, json, sys, tiktoken, pathlib, random, math
 from gpt import GPTModel
 from dataset import prepare_dataloader, train_val_split
 from typing import List, Tuple
@@ -105,11 +105,20 @@ def evaluate_dataloader(dataloader: "torch.dataloader", model: GPTModel, device:
 def train(num_epochs: int, model: GPTModel, optimizer: "torch.optimizer", train_dl: "torch.dataloader", val_dl: "torch.dataloader", device: "torch.device") -> dict:
     
     model = model.to(device)
+    
+    initial_lr = 0.0001
+    peak_lr = 0.01
+    min_lr = 0.1 * initial_lr
+    warmup_steps = 20
+    total_steps = len(train_dl) * num_epochs
 
     train_loss_ep = []
     train_acc_ep = []
     val_loss_ep = []
     val_acc_ep = []
+    
+    current_step = 0
+    lr_list = []
     
     for ep in range(num_epochs):
         train_loss_list = []
@@ -119,14 +128,30 @@ def train(num_epochs: int, model: GPTModel, optimizer: "torch.optimizer", train_
         
             for i, train_batch in enumerate(pbar):           
                 optimizer.zero_grad() # resets the gradients to zero for this batch
+                
+                if current_step < warmup_steps:
+                    lr = initial_lr + current_step * (peak_lr - initial_lr) / warmup_steps
+                else:
+                    progress = (current_step - warmup_steps) / (total_steps - warmup_steps)
+                    lr = min_lr + 0.5 * (peak_lr - min_lr) * (1 + math.cos(math.pi * progress))
+                
+                lr_list.append(lr)
+                for i in range(len(optimizer.param_groups)):
+                    optimizer.param_groups[i]["lr"] = lr
+                
                 loss, acc = evaluate_batch(batch=train_batch, model=model, device=device, is_train=True)
                 loss.backward() # calculates the gradients of the loss w.r.t. model parameters
+                
+                if current_step > warmup_steps:
+                    torch.nn.utils.clip_grad_norm_(parameters=model.parameters(), max_norm=1.0, norm_type=2.0)
+                
                 optimizer.step() # performs gradient descent step on model paramters
                 
                 train_loss_list.append(loss.item())
                 train_acc_list.append(acc.item())
             
                 pbar.set_postfix({"train_batch_loss": f"{loss:.3f}", "train_batch_acc": f"{acc:.3f}"})
+                current_step += 1
             
         train_loss = sum(train_loss_list)/len(train_loss_list)
         train_acc = sum(train_acc_list)/len(train_acc_list)
@@ -141,7 +166,8 @@ def train(num_epochs: int, model: GPTModel, optimizer: "torch.optimizer", train_
         print(f"Epoch: {ep+1}/{num_epochs}, train_epoch_loss: {train_loss:.3f}, train_epoch_acc: {train_acc:.3f}, val_epoch_loss: {val_loss:.3f}, val_epoch_acc: {val_acc:.3f}")
     
     history = {"train": {"loss": train_loss_ep, "acc": train_acc_ep},
-            "val": {"loss": val_loss_ep, "acc": val_acc_ep}}
+            "val": {"loss": val_loss_ep, "acc": val_acc_ep},
+            "lr": lr_list}
 
     return history
     
@@ -165,7 +191,8 @@ if __name__ == "__main__":
         "emb_dim": 768,
         "n_heads": 12,
         "n_layers": 12,
-        "drop_rate": 0.1
+        "drop_rate": 0.1,
+        "qkv_bias": True
     }
     IS_TRAIN = False
     tokenizer = tiktoken.get_encoding("gpt2")
@@ -178,12 +205,13 @@ if __name__ == "__main__":
     train_dl = prepare_dataloader(text=train_text, tokenizer=tokenizer, max_context_length=CONFIG["max_context_length"], batch_size=BATCH_SIZE, is_train=True)
     val_dl = prepare_dataloader(text=val_text, tokenizer=tokenizer, max_context_length=CONFIG["max_context_length"], batch_size=BATCH_SIZE, is_train=False)
 
-    optimizer = torch.optim.AdamW(params=model.parameters(), lr=0.0004, betas=(0.9, 0.999), weight_decay=0.1)
+    optimizer = torch.optim.AdamW(params=model.parameters(), lr=0, betas=(0.9, 0.999), weight_decay=0.1)
     
     if IS_TRAIN:
-        history = train(num_epochs=10, model=model, optimizer=optimizer, train_dl=train_dl, val_dl=val_dl, device=device)
+        history = train(num_epochs=1, model=model, optimizer=optimizer, train_dl=train_dl, val_dl=val_dl, device=device)
         torch.save(model.state_dict(), pathlib.Path(pathlib.Path.cwd(), "model.pth"))
     else:
         model.load_state_dict(torch.load(pathlib.Path(pathlib.Path.cwd(), "model.pth")))
         text = generate_text(start_context="Hello, I am not a", model=model, tokenizer=tokenizer, device=device, max_num_tokens=20)
         print(text)
+        

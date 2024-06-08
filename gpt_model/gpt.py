@@ -65,13 +65,14 @@ class FeedForward(torch.nn.Module):
 
 class MultiHeadCausalSelfAttention(torch.nn.Module):
     
-    def __init__(self, in_embedding_dim, out_embedding_dim, max_sequence_length, num_heads, dropout_prob=0.2):
+    def __init__(self, in_embedding_dim: int, out_embedding_dim: int, max_sequence_length: int, num_heads: int, dropout_prob: float=0.2, qkv_bias: bool=False):
         
         super(MultiHeadCausalSelfAttention, self).__init__()
         self.d_in = in_embedding_dim
         self.d_out = out_embedding_dim
         self.Tmax = max_sequence_length
         self.h = num_heads
+        self.qkv_bias = qkv_bias
         
         if self.d_out % self.h == 0:
             self.d_h = self.d_out // self.h
@@ -80,13 +81,13 @@ class MultiHeadCausalSelfAttention(torch.nn.Module):
         
         self.query_layer = torch.nn.Linear(in_features=self.d_in, 
                                            out_features=self.d_out, 
-                                           bias=False)
+                                           bias=self.qkv_bias)
         self.key_layer = torch.nn.Linear(in_features=self.d_in,
                                          out_features=self.d_out,
-                                         bias=False)
+                                         bias=self.qkv_bias)
         self.value_layer = torch.nn.Linear(in_features=self.d_in, 
                                            out_features=self.d_out, 
-                                           bias=False)
+                                           bias=self.qkv_bias)
         self.linear = torch.nn.Linear(in_features=self.d_out,
                                       out_features=self.d_out,
                                       bias=True) # Optional
@@ -96,7 +97,7 @@ class MultiHeadCausalSelfAttention(torch.nn.Module):
         mask = torch.triu(mask, diagonal=1) # (Tmax, Tmax)
         self.register_buffer("mask", mask)
         
-    def forward(self, inputs):
+    def forward(self, inputs: torch.tensor) -> torch.tensor:
         
         assert inputs.shape[-1] == self.d_in, f"inputs.shape must be (b, T, {self.d_in})"
         assert list(inputs.shape).__len__() == 3, "inputs rank must be 3"
@@ -137,20 +138,22 @@ class MultiHeadCausalSelfAttention(torch.nn.Module):
 
 class Transformer(torch.nn.Module):
     
-    def __init__(self, num_features: int, max_sequence_length: int, num_heads: int, dropout_prob: float):
+    def __init__(self, num_features: int, max_sequence_length: int, num_heads: int, dropout_prob: float, qkv_bias: bool):
         
         super(Transformer, self).__init__()
         self.d = num_features
         self.Tmax = max_sequence_length
         self.h = num_heads
         self.p = dropout_prob
+        self.qkv_bias = qkv_bias
         
         self.layernorm1 = LayerNormalization(num_features=self.d)
         self.mhcsa = MultiHeadCausalSelfAttention(in_embedding_dim=self.d,
                                                   out_embedding_dim=self.d,
                                                   max_sequence_length=self.Tmax,
                                                   num_heads=self.h,
-                                                  dropout_prob=self.p)
+                                                  dropout_prob=self.p,
+                                                  qkv_bias=qkv_bias)
         
         self.layernorm2 = LayerNormalization(num_features=self.d)
         self.ff = FeedForward(num_features=self.d,
@@ -183,6 +186,7 @@ class GPTModel(torch.nn.Module):
         self.h = config["n_heads"]
         self.L = config["n_layers"]
         self.p = config["drop_rate"]
+        self.qkv_bias = config["qkv_bias"]
         
         self.token_embed_layer = torch.nn.Embedding(num_embeddings=self.V,
                                                     embedding_dim=self.d)
@@ -193,7 +197,8 @@ class GPTModel(torch.nn.Module):
         self.transformer_layers = torch.nn.Sequential(*[Transformer(num_features=self.d,
                                                                     max_sequence_length=self.Tmax,
                                                                     num_heads=self.h,
-                                                                    dropout_prob=self.p) for _ in range(self.L)])
+                                                                    dropout_prob=self.p,
+                                                                    qkv_bias=self.qkv_bias) for _ in range(self.L)])
         self.layernorm = LayerNormalization(num_features=self.d)
         
         self.output_layer = torch.nn.Linear(in_features=self.d, 
@@ -230,7 +235,8 @@ if __name__ == "__main__":
         "emb_dim": 768,
         "n_heads": 12,
         "n_layers": 12,
-        "drop_rate": 0.1
+        "drop_rate": 0.1,
+        "qkv_bias": True
     }
     
     model = GPTModel(config=CONFIG)
