@@ -1,4 +1,4 @@
-import torch, requests, tqdm, pathlib
+import torch, requests, tqdm, pathlib, zipfile, tarfile, shutil
 
 def download_file(src_url: str, destination_file_path: pathlib.Path, is_text: bool=False) -> None:
     
@@ -16,6 +16,10 @@ def download_file(src_url: str, destination_file_path: pathlib.Path, is_text: bo
         if destination_file_path.stat().st_size == file_size:
             print(f"File already downloaded and matches the expected size ({file_size / (1024 ** 2):.2f} MB). Skipping download.")
             return None
+        elif file_size == 0:
+            print(f"File already downloaded but cannot be matched with the expected size ({file_size / (1024 ** 2):.2f} MB). Skipping download. "+
+                  "Delete the file before starting fresh download")
+            return None
         else:
             pathlib.Path.unlink(destination_file_path)
             print(f"File already downloaded but does not match the expected size ({file_size / (1024 ** 2):.2f} MB). Starting fresh download.")
@@ -30,7 +34,7 @@ def download_file(src_url: str, destination_file_path: pathlib.Path, is_text: bo
     with open(file=destination_file_path, mode=mode, encoding=encoding) as f: 
         with tqdm.tqdm(response.iter_content(chunk_size=chunk_size, decode_unicode=is_text),
                        desc="Downloading...",
-                       total=file_size//chunk_size,
+                       total=file_size//chunk_size if file_size > 0 else None,
                        unit=f" chunk (1 chunk = {chunk_size//1024} KB)",
                        colour="green") as pbar:
             for i, chunk in enumerate(pbar):
@@ -40,7 +44,33 @@ def download_file(src_url: str, destination_file_path: pathlib.Path, is_text: bo
     
     print(f"Download is successfully completed! Total disk space used: {file_size / (1024 ** 2):.2f} MB")
     return None
+
+def uncompress_file(src_file_path: pathlib.Path, dest_dir_path: pathlib.Path) -> None:
+    
+    if pathlib.Path.exists(dest_dir_path):
+        dir_content = [i for i in pathlib.Path.iterdir(dest_dir_path)]
+        if dir_content:
+            print(f"{dest_dir_path} is not empty so unzipping process is skipped")
+            return None
+    else:
+        pathlib.Path.mkdir(dest_dir_path)
         
+    file_type = src_file_path.suffix
+    if file_type == ".zip":
+        with zipfile.ZipFile(file=src_file_path, mode="r") as f:
+            f.extractall(path=dest_dir_path)
+        print(f"Extracted {src_file_path} to {dest_dir_path}")
+            
+    elif file_type in [".tar", ".gz", ".bz2", ".xz"]:
+        with tarfile.open(name=src_file_path, mode="r:*") as f:
+            f.extractall(path=dest_dir_path)
+        print(f"Extracted {src_file_path} to {dest_dir_path}")
+        
+    else:
+        raise ValueError(f"Unsupported file extension: {file_type}")
+
+    return None
+      
 if __name__ == "__main__":
     
     url = "https://www.cs.cmu.edu/~./enron/enron_mail_20150507.tar.gz"
