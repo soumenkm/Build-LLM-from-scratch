@@ -5,3 +5,4 @@ DS_Store
 *.pth
 data
 gpt_model/openai_gpt2
+fine_tuning/datasets
