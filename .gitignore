@@ -1,8 +1,10 @@
 torch_pg.py
 __pycache__
 .vscode
-DS_Store
+.DS_Store
 *.pth
 data
 gpt_model/openai_gpt2
 fine_tuning/datasets
+fine_tuning/model_ckpt
+fine_tuning/outputs

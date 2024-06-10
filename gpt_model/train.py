@@ -71,7 +71,7 @@ def evaluate_batch(batch: Tuple[torch.tensor, torch.tensor], model: GPTModel, de
         
     pred_logits = pred_logits.flatten(start_dim=0, end_dim=1) # (b*T, V)
     targets = targets.flatten(start_dim=0, end_dim=1) # (b*T,)
-    
+
     loss_metric = torch.nn.functional.cross_entropy(input=pred_logits, target=targets)
     acc_metric = (pred_logits.argmax(dim=-1) == targets).to(torch.float32).mean()
 
@@ -141,7 +141,7 @@ def train(num_epochs: int, model: GPTModel, optimizer: "torch.optimizer", train_
                 lr_list.append(lr)
                 for i in range(len(optimizer.param_groups)):
                     optimizer.param_groups[i]["lr"] = lr
-                
+
                 loss, acc = evaluate_batch(batch=train_batch, model=model, device=device, is_train=True)
                 loss.backward() # calculates the gradients of the loss w.r.t. model parameters
                 
@@ -190,14 +190,14 @@ if __name__ == "__main__":
     BATCH_SIZE = 16
     CONFIG = {
         "vocab_size": 50257,
-        "max_context_length": 256,
+        "max_context_length": 1024,
         "emb_dim": 768,
         "n_heads": 12,
         "n_layers": 12,
         "drop_rate": 0.1,
         "qkv_bias": True
     }
-    IS_TRAIN = False
+    IS_TRAIN = True
     tokenizer = tiktoken.get_encoding("gpt2")
     model = GPTModel(config=CONFIG)
 
@@ -205,14 +205,14 @@ if __name__ == "__main__":
     file_list = [str(i) for i in corpus_path.iterdir()]
 
     train_text, val_text = train_val_split(file_list=file_list, train_val_split_ratio=0.8)
-    train_dl = prepare_dataloader(text=train_text, tokenizer=tokenizer, max_context_length=CONFIG["max_context_length"], batch_size=BATCH_SIZE, is_train=True)
-    val_dl = prepare_dataloader(text=val_text, tokenizer=tokenizer, max_context_length=CONFIG["max_context_length"], batch_size=BATCH_SIZE, is_train=False)
+    train_dl = prepare_dataloader(text=train_text, tokenizer=tokenizer, max_context_length=CONFIG["max_context_length"]//2, batch_size=BATCH_SIZE, is_train=True)
+    val_dl = prepare_dataloader(text=val_text, tokenizer=tokenizer, max_context_length=CONFIG["max_context_length"]//2, batch_size=BATCH_SIZE, is_train=False)
 
     optimizer = torch.optim.AdamW(params=model.parameters(), lr=0, betas=(0.9, 0.999), weight_decay=0.1)
     
     if IS_TRAIN:
         history = train(num_epochs=1, model=model, optimizer=optimizer, train_dl=train_dl, val_dl=val_dl, device=device)
-        torch.save(model.state_dict(), pathlib.Path(pathlib.Path.cwd(), "model.pth"))
+        # torch.save(model.state_dict(), pathlib.Path(pathlib.Path.cwd(), "model.pth"))
     else:
         model.load_state_dict(torch.load(pathlib.Path(pathlib.Path.cwd(), "model.pth")))
         text = generate_text(start_context="Hello, I am not a", model=model, tokenizer=tokenizer, device=device, max_num_tokens=20)
