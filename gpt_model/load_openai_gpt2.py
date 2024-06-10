@@ -1,6 +1,10 @@
+import sys, pathlib
+
+sys.path.append(str(pathlib.Path(__file__).parent)) # gpt_model is in search list now
+
 from gpt_download import download_and_load_gpt2
 from gpt import GPTModel
-import pathlib, torch, tiktoken
+import torch, tiktoken
 from train import generate_text
 
 def assign_parameter(old_param: torch.tensor, new_param: "Any Tensor", qkv_type: "str: q, k, v"=None, is_bias: bool=None) -> torch.tensor:
@@ -29,7 +33,7 @@ def assign_parameter(old_param: torch.tensor, new_param: "Any Tensor", qkv_type:
         else:
             raise ValueError(f"Shape incompatible! (1, 3) * old_param.shape={old_param.shape} doesn't match with new_param.shape={new_param.shape}")
 
-def get_openai_gpt2_parameters(model: GPTModel) -> dict:
+def get_openai_gpt2_parameters(model: GPTModel, params: dict) -> dict:
          
     openai_gpt2_state_dict = {}
 
@@ -133,7 +137,7 @@ if __name__ == "__main__":
     tokenizer = tiktoken.get_encoding("gpt2")
     
     current_dir = pathlib.Path.cwd()
-    settings, params = download_and_load_gpt2(model_size="1558M", models_dir=pathlib.Path(current_dir,"gpt_model","openai_gpt2"))
+    settings, params = download_and_load_gpt2(model_size="124M", models_dir=pathlib.Path(current_dir,"gpt_model","openai_gpt2"), is_download=False)
 
     CONFIG = {
         "vocab_size": settings["n_vocab"],
@@ -146,9 +150,9 @@ if __name__ == "__main__":
     }
     
     model = GPTModel(config=CONFIG)
-    openai_gpt2_state_dict = get_openai_gpt2_parameters(model)
+    openai_gpt2_state_dict = get_openai_gpt2_parameters(model, params=params)
     model.load_state_dict(state_dict=openai_gpt2_state_dict, strict=False)  
     
     model = model.to(device)
-    text = generate_text(start_context="The quick sort algorithm is", model=model, tokenizer=tokenizer, device=device, max_num_tokens=250, temperature=0.7)
+    text = generate_text(start_context="The quick sort algorithm is", model=model, tokenizer=tokenizer, device=device, max_num_tokens=50, temperature=0.7)
     print(text) 

@@ -1,4 +1,7 @@
-import torch, tqdm, pathlib, tiktoken
+import torch, tqdm, pathlib, tiktoken, sys
+
+sys.path.append(str(pathlib.Path(__file__))) # fine_tuning is in search list now
+
 from download import download_file, uncompress_file
 import pandas as pd
 from typing import Tuple, List

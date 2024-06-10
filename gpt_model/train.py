@@ -1,4 +1,7 @@
 import torch, torchinfo, json, sys, tiktoken, pathlib, random, math
+
+sys.path.append(str(pathlib.Path(__file__))) # gpt_model is in search list now
+
 from gpt import GPTModel
 from dataset import prepare_dataloader, train_val_split
 from typing import List, Tuple
