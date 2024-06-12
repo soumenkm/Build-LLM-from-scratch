@@ -8,3 +8,4 @@ gpt_model/openai_gpt2
 fine_tuning/datasets
 fine_tuning/model_ckpt
 fine_tuning/outputs
+ckpt
