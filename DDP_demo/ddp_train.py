@@ -1,9 +1,11 @@
 import torch, os, pathlib
-from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.multiprocessing as mp
+import matplotlib.pyplot as plt
 from typing import List, Tuple, Union
 from torchvision import datasets
 from torchvision.transforms import ToTensor
+from tqdm import tqdm
+from torch.nn.parallel import DistributedDataParallel as DDP
 
 class FeedForward(torch.nn.Module):
     
@@ -77,11 +79,18 @@ class Trainer:
         self.collate_fn = collate_fn
         self.val_fraction = val_fraction
         self.checkpoint_dir = checkpoint_dir
+        self.device_info = f"[GPU_{self.device} (DDP)]" if self.is_ddp else f"[{str(self.device).upper()} (SEQ)]"
         
         self.train_dl = self._create_dataloader(is_train=True)
         self.val_dl = self._create_dataloader(is_train=False)
         
         self.start_epoch = 0 # to keep track of resuming from checkpoint
+        
+        # Lists to store metrics
+        self.train_loss_list = []
+        self.train_acc_list = []
+        self.val_loss_list = []
+        self.val_acc_list = []
         
     def _create_dataloader(self, is_train: bool) -> "torch.utils.data.DataLoader":
         
@@ -138,7 +147,7 @@ class Trainer:
         
         return acc
     
-    def _optimize_batch(self, batch: Tuple[torch.tensor, torch.tensor]) -> Tuple[float, float]:
+    def _optimize_batch(self, batch: Tuple[torch.tensor, torch.tensor]) -> Tuple[torch.tensor, torch.tensor]:
         
         pred_y = self._forward_batch(batch=batch, is_train=True)
         self.optimizer.zero_grad(set_to_none=True)
@@ -150,52 +159,82 @@ class Trainer:
         
         return loss, acc
                    
-    def _optimize_dataloader(self, dataloader: "torch.utils.data.DataLoader") -> Tuple[float, float]:
+    def _optimize_dataloader(self, epoch: int, dataloader: "torch.utils.data.DataLoader") -> Tuple[torch.tensor, torch.tensor]:
         
         num_steps = len(self.train_dl)
         loss_list = []
         acc_list = []
         
-        for i, batch in enumerate(self.train_dl):
-            loss, acc = self._optimize_batch(batch=batch)
-            loss_list.append(loss.item())
-            acc_list.append(acc.item())
-            # print(f"Step: {i+1}/{num_steps}, Train loss: {loss:.3f}, Train acc: {acc:.3f}")
+        with tqdm(iterable=self.train_dl, 
+                  desc=f"{self.device_info}, ep: {epoch}/{self.num_epochs-1}", 
+                  total=len(self.train_dl),
+                  unit=" step") as pbar:
         
-        return sum(loss_list)/len(loss_list), sum(acc_list)/len(acc_list)
+            for batch in pbar:
+                loss, acc = self._optimize_batch(batch=batch)
+                loss_list.append(loss.item())
+                acc_list.append(acc.item())
+                
+                pbar.set_postfix({"tr_loss": f"{loss.item():.3f}", "tr_acc": f"{acc.item():.3f}"})
+        
+        loss_dl = torch.tensor(sum(loss_list)/len(loss_list))
+        acc_dl = torch.tensor(sum(acc_list)/len(acc_list))
+            
+        return loss_dl, acc_dl 
     
-    def _validate_dataloader(self, dataloader: "torch.utils.data.DataLoader") -> Tuple[float, float]:
+    def _validate_dataloader(self, epoch: int, dataloader: "torch.utils.data.DataLoader") -> Tuple[torch.tensor, torch.tensor]:
         
         loss_list = []
         acc_list = []
         
-        for i, batch in enumerate(self.val_dl):  
-            pred_y = self._forward_batch(batch=batch, is_train=False)
-            loss = self._calc_loss_batch(pred_outputs=pred_y, true_outputs=batch[1])
-            acc = self._calc_accuracy_batch(pred_outputs=pred_y, true_outputs=batch[1])
-            
-            loss_list.append(loss.item())
-            acc_list.append(acc.item())
+        with tqdm(iterable=self.val_dl, 
+                  desc=f"{self.device_info}, ep: {epoch}/{self.num_epochs-1}", 
+                  total=len(self.val_dl),
+                  unit=" batch") as pbar:
         
-        return sum(loss_list)/len(loss_list), sum(acc_list)/len(acc_list)
+            for batch in pbar:  
+                pred_y = self._forward_batch(batch=batch, is_train=False)
+                loss = self._calc_loss_batch(pred_outputs=pred_y, true_outputs=batch[1])
+                acc = self._calc_accuracy_batch(pred_outputs=pred_y, true_outputs=batch[1])
+                
+                loss_list.append(loss.item())
+                acc_list.append(acc.item())
+                
+                pbar.set_postfix({"val_loss": f"{loss.item():.3f}", "val_acc": f"{acc.item():.3f}"})
+        
+        loss_dl = torch.tensor(sum(loss_list)/len(loss_list))
+        acc_dl = torch.tensor(sum(acc_list)/len(acc_list))
+        
+        return loss_dl, acc_dl
     
-    def _save_checkpoint(self, epoch: int, loss: float, acc: float) -> None:
+    def _save_checkpoint(self, epoch: int) -> None:
         
         checkpoint = {
             "epoch": epoch,
             "model_state": self.model.state_dict(),
             "opt_state": self.optimizer.state_dict(),
-            "loss": loss,
-            "acc": acc,
+            "train_loss_list": self.train_loss_list,
+            "train_acc_list": self.train_acc_list,
+            "val_loss_list": self.val_loss_list,
+            "val_acc_list": self.val_acc_list
         }
         if not pathlib.Path.exists(self.checkpoint_dir):
             pathlib.Path.mkdir(self.checkpoint_dir, parents=True, exist_ok=True)
             
         checkpoint_path = pathlib.Path(self.checkpoint_dir, f"checkpoint_epoch_{epoch}.pth")
         torch.save(checkpoint, checkpoint_path)
-        print(f"Checkpoint saved: {checkpoint_path}")
+        print(f"{self.device_info}, ep: {epoch}/{self.num_epochs-1}, Checkpoint saved: {checkpoint_path}")
     
-    def _load_checkpoint(self, checkpoint_dir: pathlib.Path) -> int:
+    def _postprocess_load_checkpoint(self, checkpoint_path: pathlib.Path) -> None:
+        
+        print(f"{self.device_info}, Checkpoint loaded from {checkpoint_path}")
+          
+    def _load_checkpoint(self, checkpoint_dir: pathlib.Path) -> None:
+        
+        if not pathlib.Path.exists(checkpoint_dir):
+            print(f"{self.device_info}, No such directory: {checkpoint_dir}, starting fresh training")
+            self.start_epoch = 0
+            return None
         
         checkpoint_files = []
         for i in pathlib.Path.iterdir(checkpoint_dir):
@@ -204,7 +243,9 @@ class Trainer:
         
         # If no checkpoints found, return 0 to start from scratch
         if not checkpoint_files:
-            return 0
+            print(f"{self.device_info}, No checkpoints found on directory: {checkpoint_dir}, starting fresh training")
+            self.start_epoch = 0
+            return None
         
         # Find the latest checkpoint file
         latest_checkpoint = max(checkpoint_files, key=lambda x: x[1])[0]
@@ -213,39 +254,106 @@ class Trainer:
         
         self.model.load_state_dict(checkpoint["model_state"])
         self.optimizer.load_state_dict(checkpoint["opt_state"])
-        start_epoch = checkpoint["epoch"] + 1  # Start from the next epoch
+        
+        # Move optimizer states to the correct device
+        for state in self.optimizer.state.values():
+            if isinstance(state, torch.Tensor):
+                state.data = state.data.to(self.device)
+            elif isinstance(state, dict):
+                for key, value in state.items():
+                    if isinstance(value, torch.Tensor):
+                        state[key] = value.to(self.device)
+        
+        self.train_loss_list = checkpoint["train_loss_list"]
+        self.train_acc_list = checkpoint["train_acc_list"]
+        self.val_loss_list = checkpoint["val_loss_list"]
+        self.val_acc_list = checkpoint["val_acc_list"]
+        
+        self.start_epoch = checkpoint["epoch"] + 1  # Start from the next epoch
 
         if self.is_ddp:
-            if self.device == 0:
-                print(f"Checkpoint loaded from {latest_checkpoint}")
+            if (self.device == 0):
+                self._postprocess_load_checkpoint(latest_checkpoint)
         else:
-            print(f"Checkpoint loaded from {latest_checkpoint}")
+            self._postprocess_load_checkpoint(latest_checkpoint)
         
-        return start_epoch
+        return None
 
-    def train(self, is_load_checkpoint: bool = True) -> None:
+    def _save_metric_plots(self, epoch: int, save_dir: pathlib.Path) -> None:
+        
+        history = {"train": {"loss": self.train_loss_list, "acc": self.train_acc_list},
+                   "val": {"loss": self.val_loss_list, "acc": self.val_acc_list}}
+        
+        train_loss = history["train"]["loss"]
+        train_acc = history["train"]["acc"]
+        val_loss = history["val"]["loss"]
+        val_acc = history["val"]["acc"]
+        epochs = range(1, len(train_loss) + 1)
+
+        plt.figure(figsize=(16, 9))
+
+        # Plot loss
+        plt.subplot(1, 2, 1)
+        plt.plot(epochs, train_loss, label='Train Loss')
+        plt.plot(epochs, val_loss, label='Validation Loss')
+        plt.xlabel('Epochs')
+        plt.ylabel('Loss')
+        plt.title('Training and Validation Loss')
+        plt.legend()
+
+        # Plot accuracy
+        plt.subplot(1, 2, 2)
+        plt.plot(epochs, train_acc, label='Train Accuracy')
+        plt.plot(epochs, val_acc, label='Validation Accuracy')
+        plt.xlabel('Epochs')
+        plt.ylabel('Accuracy')
+        plt.title('Training and Validation Accuracy')
+        plt.legend()
+
+        # Save the figure
+        save_dir.mkdir(parents=True, exist_ok=True)
+        save_path = pathlib.Path(save_dir, 'training_validation_metrics.png')
+        plt.savefig(save_path)
+        print(f"{self.device_info}, ep: {epoch}/{self.num_epochs-1}, Train and validation metrics saved at: {save_path}")
+
+    def _postprocess_train(self, epoch: int, train_loss: torch.tensor, train_acc: torch.tensor) -> None:
+        
+        val_loss, val_acc = self._validate_dataloader(epoch=epoch, dataloader=self.val_dl)
+        self.val_loss_list.append(val_loss.item())
+        self.val_acc_list.append(val_acc.item())
+        
+        msg = f"ep: {epoch}/{self.num_epochs-1}, Train loss: {train_loss.item():.3f}, Train acc: {train_acc.item():.3f}, Val loss: {val_loss.item():.3f}, Val acc: {val_acc.item():.3f}"
+        print(f"{self.device_info}, {msg}")
+        self._save_checkpoint(epoch=epoch)
+        self._save_metric_plots(epoch=epoch, save_dir=self.checkpoint_dir)
+
+    def train(self, is_load_checkpoint: bool) -> None:
         
         if is_load_checkpoint:
-            self.start_epoch = self._load_checkpoint(checkpoint_dir=self.checkpoint_dir)
-        else:
-            self.start_epoch = 0
+            self._load_checkpoint(checkpoint_dir=self.checkpoint_dir)
             
+        # Synchronize all processes to ensure checkpoint loading is complete
+        if self.is_ddp:
+            torch.distributed.barrier()
+        
         for ep in range(self.start_epoch, self.num_epochs):
             if self.is_ddp:
                 self.train_dl.sampler.set_epoch(ep)
                 
-            loss, acc = self._optimize_dataloader(dataloader=self.train_dl)
-            loss_val, acc_val = self._validate_dataloader(dataloader=self.val_dl)
-            msg = f"Epoch: {ep+1}/{self.num_epochs}, Train loss: {loss:.3f}, Train acc: {acc:.3f}, Val loss: {loss_val:.3f}, Val acc: {acc_val:.3f}"
+            train_loss, train_acc = self._optimize_dataloader(epoch=ep, dataloader=self.train_dl)
+            self.train_loss_list.append(train_loss.item())
+            self.train_acc_list.append(train_acc.item())
             
-            if self.is_ddp:
-                if self.device == 0:
-                    print(f"Device : DDP_GPU_RANK_{self.device}, {msg}")
-                    self._save_checkpoint(epoch=ep, loss=loss, acc=acc)
+            if self.is_ddp: 
+                if (self.device == 0):
+                    self._postprocess_train(epoch=ep, train_loss=train_loss, train_acc=train_acc)
             else:
-                print(f"Device: {str(self.device).upper()}, {msg}")
-                self._save_checkpoint(epoch=ep, loss=loss, acc=acc)
+                self._postprocess_train(epoch=ep, train_loss=train_loss, train_acc=train_acc)
             
+            # Synchronize all processes to ensure checkpoint saving is complete
+            if self.is_ddp:
+                torch.distributed.barrier()
+                        
 def prepare_datasets() -> Tuple["torch.utils.data.Dataset", "torch.utils.data.Dataset"]:
     
     training_data = datasets.MNIST(
@@ -289,7 +397,7 @@ def ddp_cleanup() -> None:
     
     torch.distributed.destroy_process_group()
 
-def main(rank: int, is_ddp: bool, world_size: int, num_epochs: int, batch_size: int) -> None:
+def main(rank: int, is_ddp: bool, world_size: int, num_epochs: int, batch_size: int, is_load_checkpoint: bool) -> None:
     
     if is_ddp:
         if torch.cuda.is_available():
@@ -318,7 +426,7 @@ def main(rank: int, is_ddp: bool, world_size: int, num_epochs: int, batch_size: 
                       val_fraction=0.5,
                       checkpoint_dir=pathlib.Path(pathlib.Path.cwd(), "ckpt"))
     
-    trainer.train(is_load_checkpoint=True)
+    trainer.train(is_load_checkpoint=is_load_checkpoint)
     
     if is_ddp:
         ddp_cleanup()
@@ -330,12 +438,13 @@ if __name__ == "__main__":
         cvd += str(i) + ","
         
     os.environ["CUDA_VISIBLE_DEVICES"] = cvd
-    num_epochs = 10
+    num_epochs = 2
     batch_size = 64
+    is_load_checkpoint = True
     is_ddp = True if len(cuda_ids) > 1 else False
     
     if is_ddp:
         world_size = len(cuda_ids)
-        mp.spawn(fn=main, args=(is_ddp, world_size, num_epochs, batch_size), nprocs=world_size)
+        mp.spawn(fn=main, args=(is_ddp, world_size, num_epochs, batch_size, is_load_checkpoint), nprocs=world_size)
     else:
-        main(rank=None, is_ddp=False, world_size=None, num_epochs=num_epochs, batch_size=batch_size)
+        main(rank=None, is_ddp=False, world_size=None, num_epochs=num_epochs, batch_size=batch_size, is_load_checkpoint=is_load_checkpoint)
