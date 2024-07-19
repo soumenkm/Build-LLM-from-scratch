@@ -35,15 +35,15 @@ def generate_text(start_context: str, model: GPTModel, tokenizer: "tiktoken.toke
         
         with torch.no_grad():
             inputs = inputs.to(device)
-            outputs = model(inputs, is_logits=True) # (1, T, V)
-        
-        top_k_limit = torch.sort(outputs, dim=-1, descending=True)[0][:,:,-1].unsqueeze(-1) # (1, T, 1)
-        mask = torch.full_like(outputs, fill_value=-torch.inf) # (1, T, V)
-        outputs_mask = torch.where(condition=outputs<top_k_limit, input=mask, other=outputs) # (1, T, V)
+            outputs = outputs[0, -1, :] # (V,)
+            
+        top_k_limit = torch.sort(outputs, descending=True)[0][:top_k][-1] # scalar
+        mask = torch.full_like(outputs, fill_value=-torch.inf) # (V,)
+        outputs_mask = torch.where(condition=outputs<top_k_limit, input=mask, other=outputs) # (V,)
         outputs_mask = outputs_mask / temperature
-        outputs_mask_prob = torch.nn.functional.softmax(input=outputs_mask, dim=-1) # (1, T, V)
+        outputs_mask_prob = torch.nn.functional.softmax(input=outputs_mask, dim=-1) # (V,)
         
-        last_multnom_index = torch.multinomial(input=outputs_mask_prob[0,-1,:], num_samples=1) # (1,)
+        last_multnom_index = torch.multinomial(input=outputs_mask_prob, num_samples=1) # (1,)
         last_token_pred = last_multnom_index.unsqueeze(-1) # (1, 1)  
         if last_token_pred[0,0] == tokenizer.eot_token:
             break

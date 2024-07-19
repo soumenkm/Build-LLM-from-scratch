@@ -13,16 +13,42 @@ class InstructDataset(Dataset):
         self, 
         dataset_path: Path, 
         tokenizer: "tiktoken.tokenizer",
-        device: torch.device
+        device: torch.device,
+        max_context_length: int
     ) -> None:
         """dataset must be in json format 
         List[Dict{instruction: str, input: str, output: str}]"""
         
         super(InstructDataset, self).__init__()
         self.dataset_path = dataset_path
-        self.dataset = json.load(open(self.dataset_path, "r"))
+        self.raw_dataset = json.load(open(self.dataset_path, "r"))
+        self.max_context_length = max_context_length
         self.tokenizer = tokenizer
         self.device = device
+        self.dataset = self._preprocess_dataset()
+
+    def _preprocess_dataset(self) -> List[dict]:
+        
+        dataset = []
+        eot_token_id = torch.tensor([self.tokenizer.eot_token], 
+                                        device=self.device) # (1,)
+        for index in range(len(self.raw_dataset)):
+            example = self.raw_dataset[index]
+            input_text = self._apply_alphaca_format(example=example)
+            input_token_ids = torch.tensor(self.tokenizer.encode(text=input_text), 
+                                           device=self.device) # (T,)
+            target_token_ids = torch.concat([input_token_ids[1:], eot_token_id], dim=-1) # (T,)
+            seq_len = input_token_ids.shape[0]
+            
+            output_dict = {
+                "input_ids": input_token_ids, # (T,)
+                "target_ids": target_token_ids, # (T,)
+                "seq_len": seq_len # scalar
+            }
+            if seq_len < self.max_context_length:
+                dataset.append(output_dict)
+        
+        return dataset
     
     def __len__(self) -> int:
         
@@ -30,17 +56,18 @@ class InstructDataset(Dataset):
     
     def _apply_alphaca_format(
         self,
-        example: dict
+        example: dict,
+        is_only_input: bool=False
     ) -> str:
         
         input_ph = f"\n\n### Input:\n{example['input']}" if example['input'] else ""
-        
+        output_ph = f"\n\n### Response:\n" if is_only_input else f"\n\n### Response:\n{example['output']}"
         instruction_text = (
             f"Below is an instruction that describes a task. " +
             f"Write a response that appropriately completes the request." +
             f"\n\n### Instruction:\n{example['instruction']}" + 
             input_ph + 
-            f"\n\n### Response:\n{example['output']}"
+            output_ph
         )
         
         return instruction_text
@@ -52,28 +79,18 @@ class InstructDataset(Dataset):
         
         if index > self.__len__() - 1 or index < 0:
             raise IndexError(f"Invalid index, index must be between 0 and {self.__len__()-1}")
-        
-        example = self.dataset[index]
-        input_text = self._apply_alphaca_format(example=example)
-        input_token_ids = torch.tensor(self.tokenizer.encode(text=input_text), 
-                                       device=self.device) # (T,)
-        target_token_ids = input_token_ids[1:].to(self.device) # (T-1,)
-        eot_token_id = torch.tensor([self.tokenizer.eot_token], 
-                                    device=self.device) # (1,)
-        target_token_ids = torch.concat([target_token_ids, eot_token_id], dim=-1) # (T,)
-        
-        output_dict = {
-            "input_ids": input_token_ids, # (T,)
-            "target_ids": target_token_ids, # (T,)
-            "seq_len": input_token_ids.shape[0] # scalar
-        }
-        
-        return output_dict
+         
+        return self.dataset[index]
     
     def collate_function(
         self,
         data: List[torch.tensor]
     ) -> Tuple[torch.tensor, torch.tensor]:
+        
+        # TODO: Instead of storing the entire tokenized dataset in a 
+        # variable, consider accessing them using __getitem__() as tokenized dataset
+        # but here, we can drop them if it exceeds max length so (b, T) -> (b', T) 
+        # where b' < b which is okay but make sure that b' != 0 (it is efficient method)
         
         x = []
         y = []
@@ -141,7 +158,8 @@ def main():
     tokenizer = tiktoken.get_encoding("gpt2")
     dataset = InstructDataset(dataset_path=dataset_path,
                               tokenizer=tokenizer,
-                              device=device)
+                              device=device,
+                              max_context_length=1024)
     
     train_dl, val_dl = dataset.prepare_dataloader()
     
