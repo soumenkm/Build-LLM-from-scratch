@@ -207,7 +207,7 @@ if __name__ == "__main__":
         plot_history(history=history, save_dir=pathlib.Path(pathlib.Path.cwd(), "fine_tuning/outputs"))
     else:
         model.load_state_dict(torch.load(pathlib.Path(pathlib.Path.cwd(), "fine_tuning/outputs/model.pth")))
-        msg1 = "Hi, do you want sex chat? Call 1234567890 just for $1.5 per mints"
+        msg1 = "You have won lottery of 100 Cr. Come to Kolkata airport to collect"
         res1 = classify_text(text=msg1, model=model, tokenizer=tokenizer, device=device)
         msg2 = f"Never fall into this kind of messages which says '{msg1}'"
         res2 = classify_text(text=msg2, model=model, tokenizer=tokenizer, device=device)
