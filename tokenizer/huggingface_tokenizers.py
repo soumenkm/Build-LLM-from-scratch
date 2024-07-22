@@ -1,28 +1,28 @@
 import tokenizers as tn
+import random
+random.seed(42)
 
-tokenizer = tn.Tokenizer(tn.models.WordPiece())
-tokenizer.decoder = tn.decoders.WordPiece()
+model = tn.models.BPE()
+tokenizer = tn.Tokenizer(model)
+
+tokenizer.decoder = tn.decoders.BPEDecoder()
 tokenizer.pre_tokenizer = tn.pre_tokenizers.Whitespace()
-print(tokenizer.model)
-print(tokenizer.decoder)
-print(tokenizer.pre_tokenizer)
-
-trainer = tn.trainers.WordPieceTrainer(vocab_size=1000,
-                                 show_progress=False,
-                                 special_tokens=["<|endoftext|>", "<|unk|>","<|pad|>","<|mask|>"])
-
-tokenizer.train(files=["/raid/speech/soumen/build-llm/tokenizer/corpus/the-verdict.txt"],
+trainer = tn.trainers.BpeTrainer(vocab_size=1000,
+                                 show_progress=True,
+                                 special_tokens=["<|endoftext|>"])
+tokenizer.train(files=["tokenizer/corpus/pg1513.txt"],
                 trainer=trainer)
 
-print(f"First 10 items in vocabulary: {list(tokenizer.get_vocab().items())[0:10]}")
-print(f"Vocabulary size: {tokenizer.get_vocab_size()}")
-print(f"Token to id: {tokenizer.token_to_id('colour')}")
-print(f"ID to token: {tokenizer.id_to_token(0)}")
+print(f"Size of vocabulary: {tokenizer.get_vocab_size()}")
+print(f"Random 10 tokens from vocabulary: ", 
+        random.sample(list(zip(tokenizer.get_vocab().items())), k=10))
+print(f"<|endoftext|> token id: ", tokenizer.token_to_id("<|endoftext|>"))
 
-text = "Hello there! How are you doing today? <|endoftext|> I like movies"
-encoded = tokenizer.encode(text, is_pretokenized=False)
+text = "I love machine learning. <|endoftext|> Do you also love ML?"
+encoded = tokenizer.encode(text)
+decoded = tokenizer.decode(encoded.ids, skip_special_tokens=False)
+
+print(text)
 print(encoded.tokens)
 print(encoded.ids)
-
-decoded = tokenizer.decode(encoded.ids, skip_special_tokens=False)
 print(decoded)
