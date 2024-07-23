@@ -1,53 +1,50 @@
-import tiktoken
-import torch
-import json
+import torch, tiktoken
+from pathlib import Path
+from torch.utils.data import Dataset
+from typing import Tuple
 
-class GPTDataset(torch.utils.data.Dataset):
-    
-    def __init__(self, raw_text, tokenizer, stride=1, max_length=4):
-        
-        super(GPTDataset, self).__init__()
-        self.max_length = max_length
-        self.stride = stride
+class RomeoDataset(Dataset):
+    def __init__(self, 
+                 corpus_file_path: Path, 
+                 tokenizer: "tiktoken.tokenizer", 
+                 max_context_len: int) -> None:   
+        super(RomeoDataset, self).__init__()
         self.tokenizer = tokenizer
-        self.raw_text = raw_text
-        self.enc_text = self.tokenizer.encode(self.raw_text)   
+        self.Tmax = max_context_len
+        with open(corpus_file_path, "r") as f:
+            raw_text = f.read()
+            self.enc_text = self.tokenizer.encode(raw_text, 
+                                                  allowed_special={"<|endoftext|>"})
+            self.enc_text.append(self.tokenizer.eot_token) # eot token is needed for last example
         
-    def __len__(self):
-        
-        length = torch.floor(torch.tensor((len(self.enc_text)-1)/self.max_length))
-        return int(length.numpy())
+    def __len__(self) -> int:
+        length = torch.floor(torch.tensor((len(self.enc_text)-1)/self.Tmax)) # excludes eot token
+        return int(length.item())
 
-    def __getitem__(self, index, is_text=False):
-        
-        start = index * self.stride
-        end = start + self.max_length
-        input_x = torch.tensor(self.enc_text[start: end], 
-                               dtype=torch.int32)
-        target_y = torch.tensor(self.enc_text[start+1: end+1], 
-                                dtype=torch.int32)
-        
-        input_x_text = self.tokenizer.decode(self.enc_text[start: end])
-        target_y_text = self.tokenizer.decode(self.enc_text[start+1: end+1])
-        
-        if is_text:
-            return (input_x_text, target_y_text)
-        else:
-            return (input_x, target_y)
+    def __getitem__(self, index: int) -> Tuple[torch.tensor, torch.tensor]:
+        start = index * self.Tmax
+        end = start + self.Tmax
+        input_x = torch.tensor(self.enc_text[start: end])
+        target_y = torch.tensor(self.enc_text[start+1: end+1])
+        return (input_x, target_y)
 
 if __name__ == "__main__":
     
-    with open("/raid/speech/soumen/build-llm/tokenizer/corpus/the-verdict.txt", "r") as f:
-        raw_text = f.read()
-
+    cwd = Path.cwd()
+    corpus_file_path = Path(cwd, "tokenizer/corpus/pg1513.txt")
     tokenizer = tiktoken.get_encoding("gpt2")
     
-    gpt_ds = GPTDataset(raw_text=raw_text, tokenizer=tokenizer, stride=4)
-    print(len(gpt_ds))
-    print(gpt_ds[0])
-    print(gpt_ds.__getitem__(0, True))
+    dataset = RomeoDataset(corpus_file_path, tokenizer, 5)
+    
+    print("Length of the dataset: ", len(dataset))
+    print("Example 1: ", dataset[0])
+    print("Example 2: ", dataset[1])
+    print("Example 3: ", dataset[2])
 
-    gpt_dl = torch.utils.data.DataLoader(gpt_ds, batch_size=4, shuffle=False, drop_last=True)
-    sample_batch = gpt_dl.__iter__().__next__()
-    print(sample_batch[0])
-    print(sample_batch[1])
+    
+    from torch.utils.data import DataLoader
+    dataloader = DataLoader(dataset=dataset, batch_size=4, shuffle=True, drop_last=True)
+    print("Number of batches: ", len(dataloader))
+    batch = next(iter(dataloader))
+    print("input_x: \n", batch[0])
+    print("target_y: \n", batch[1])
